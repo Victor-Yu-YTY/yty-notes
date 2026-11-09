@@ -1,0 +1,146 @@
+# ============================================================================
+# SQL Review DDL（技术标识 sql-review-ddl-mcp v1.0.0）配置
+# —— 正式机 10.0.0.218，端口 8010，网关后面（与 dba-mcp / SQL Review DML 同机）
+#
+# 本服务是 sql-review-mcp v1.4.0 拆分出来的 **DDL 侧**：只审
+#   建表 / 变更表 / 索引 / 破坏性操作（DROP TABLE / TRUNCATE / DROP DATABASE）
+# DML（INSERT / UPDATE / DELETE / REPLACE）在独立的 SQL Review DML 服务
+# （sql-review-dml-mcp，端口 8030）里，两边规则文档、日志、令牌、进程都互相独立。
+#
+# 遵循《011.MCP 存放规约》：
+#   运行目录 /opt/mcpservers/sql-review-ddl-mcp/            ← 由 config/deploy.conf 的 DEST 决定
+#   日志     /opt/mcpservers/sql-review-ddl-mcp/logs/       ← paths.logs（相对 base）+ audit 留存
+#   密钥     /etc/sql-review-ddl-mcp/sql-review-ddl-mcp.env（600 root:root，目录内无明文）
+#
+# 存放位置相关配置分两层，改位置时只改这两处：
+#   1) config/deploy.conf —— 部署期路径（安装目录 / 密钥目录 / 端口 / 备份保留份数）
+#   2) 本文件 paths / audit —— 运行期相对路径与日志留存
+# 部署脚本会自动校验两层是否一致（端口、日志目录），不一致直接中止。
+#
+# 密码一律用 ${环境变量名} 引用，禁止明文写入本文件。
+# 三环境只读密码由 unit 的 EnvironmentFile 注入：优先复用 /etc/dba-mcp/dba-mcp.env
+# （与 dba-mcp 同一套只读账号，不新增凭据）；若本服务 env 里已有 DEV/TEST/STAGE_DB_PASS，
+# 则沿用本服务的（升级时不会覆盖）。
+# ============================================================================
+
+server:
+  name: sql-review-ddl-mcp
+  display_name: SQL Review DDL    # 对外显示名（网关上注册的名字同此）
+  host: 0.0.0.0
+  port: 8010                 # 8000=dba-mcp、8020=旧 sql-review-mcp、8030=SQL Review DML（勿占）
+  path: /mcp                 # 客户端 url 必须带结尾斜杠：/mcp/
+
+# 第 1 层鉴权：服务准入令牌（缺失/错误 → HTTP 403）
+# 与 SQL Review DML 用**不同**的请求头与令牌，任一泄露不影响另一侧。
+auth:
+  header: "X-SQL-REVIEW-DDL-MCP-TOKEN"
+  token: ${X_SQL_REVIEW_DDL_MCP_TOKEN}
+
+# 存放位置：相对路径一律相对「安装根目录」。
+#   base 为空 → 跟随本包所在目录（默认）；填绝对路径 → 整包搬到别处也能跑
+paths:
+  base: ""                   # 期望：/opt/mcpservers/sql-review-ddl-mcp（部署脚本会核对）
+  config: config
+  standards: standards
+  logs: logs                 # 审计日志目录（/healthz 与 unit 的 ReadWritePaths 跟它走）
+  data: data
+  report: logs               # 自检报告（selftest-report.txt）落在哪
+
+# 规则来源（规则全文档化）：级别 / 说明 / 整改 / 阈值 / 参数 / 停用 全在 md 里，
+# 改规则只改 standards/ddl.md，不用改代码、不用重启（按 mtime 热加载）。
+#   standards/ddl.md   DDL 判定细则 → spec.py 解析 + ddlchecks.py 检查（★ 改规则只改这里）
+#   standards/mysql.md 总纲：完整 MySQL 使用规范原文 + 条款对照表（人读，不参与判定）
+#   standards/README.md 改规则指南
+#   override  应急兜底：临时改级别/参数/停用（正常留空）
+#   questions 反问目录：话术（支持 {占位符}）；只披露 DDL 规则相关的话术
+standard:
+  ddl: standards/ddl.md
+  total: standards/mysql.md
+  override: config/rules.override.yaml
+  questions: config/questions.yaml
+  version_file: config/STANDARD_VERSION
+  source_url: "https://wiki.example.com/doc/mysql-standard"
+  scope_note: "本服务只审 dev/test/stage 三环境提交前的 DDL（建表 / 变更表 / 索引 / 破坏性操作）；不分环境，一律按生产标准严格审。DML 请走 SQL Review DML 服务。"
+
+# dev/test/stage 只读元数据（与 dba-mcp / SQL Review DML 同一套只读账号）
+metadata:
+  backend: direct            # direct=直连只读账号；none=不连库（缺事实信息一律标 ⏸）
+  timeout: 10                # 各环境下未单独配 connect_timeout/read_timeout 时的默认值（秒）
+  environments:
+    dev:
+      host: 10.0.0.50
+      port: 3306
+      user: ro_user
+      password: ${DEV_DB_PASS}
+    test:
+      host: 10.0.10.171
+      port: 3306
+      user: ro_user
+      password: ${TEST_DB_PASS}
+    stage:
+      host: 10.0.10.101
+      port: 3306
+      user: ro_user
+      password: ${STAGE_DB_PASS}
+
+# 规模阈值与数量约束（文档阈值优先，这里是兜底；改这里不用改代码）
+thresholds:
+  big_table_rows: 5000000          # 大表标准：≥500 万行
+  big_table_size_gb: 3             # 大表标准：>3G
+  modify_column_rows: 8000000      # MODIFY COLUMN ≥800 万行 → 执行窗口 21:00~00:00
+  varchar_instant_bytes: 255       # VARCHAR 跨 255 字节不可 INSTANT
+  max_columns: 30
+  max_indexes: 5
+  max_index_cols: 5
+  max_unique_cols: 3
+  varchar_prefix_max: 8            # 长 VARCHAR 前缀索引 ≤8
+  varchar_prefix_threshold: 64     # 超过该长度的 VARCHAR 建索引必须用前缀
+
+# 单次请求限额（自助防护；网关侧还有一层同义校验）
+limits:
+  max_statements: 20         # 单次最多审核多少条语句
+  max_sql_bytes: 20000       # 单次请求 SQL 的字节上限（超过直接拒绝，不落明文）
+
+# 进程日志（journalctl 里的那些）；审计日志的留存见下面的 audit 段
+log:
+  level: INFO                # DEBUG / INFO / WARNING / ERROR
+
+# 审计日志（<paths.logs>/audit-ddl-YYYY-MM-DD.jsonl）
+#   只记事实、语义最小化：SQL 只落 sha256 与长度，永不落明文；不落 UA / 会话内容。
+#   来源信息两项：client_ip（调用方机器 IP）+ agent_id（调用方 AgentID），
+#   均由网关透传（见文件末尾 identity 段），用于"哪台机器、哪个 Agent 调了哪个工具"的追溯。
+#   未直接放行的结论都带 reject{code,stage,text,evidence}，可直接统计拒绝原因。
+#   文件名前缀用 audit-ddl，与 DML 侧的 audit-dml 区分（即使日志目录被并到一起也不串）。
+audit:
+  enabled: true
+  filename_prefix: audit-ddl  # 文件名前缀：<prefix>-YYYY-MM-DD.jsonl
+  ext: .jsonl
+  retention_days: 30          # 保留天数；<=0 表示永久保留
+  compress_after_days: 7      # 超过该天数转 .gz；<=0 表示不压缩
+  log_http_errors: true       # POST 且 HTTP>=400（协议层拒绝）也写一行留痕
+  # 注意：日志目录由 paths.logs 决定；若改成 base 之外的位置，
+  #       必须同步调整服务单元的 ReadWritePaths 配置
+
+# ============================================================================
+# 调用方身份（v1.0.1）：网关把「调用方机器 IP + AgentID」透传到本服务 → 落每行审计
+#
+#   用途：能查到「哪台机器、哪个 Agent 调了哪个工具、结论如何」；只记日志，不参与判定。
+#   安全：只有**直连方**在 trusted_proxies 内时才采信下面的透传头（防伪造）；
+#         否则只记直连方 IP，并在日志里标 identity_trusted=false。
+#   关掉：record: false → 退回 v1.0.0 行为（只记 client_ip）。
+# ============================================================================
+identity:
+  record: true                 # 是否把身份字段写进审计日志
+  agent_id_headers:            # 调用方 AgentID：按顺序取第一个非空
+    - X-Agent-Id
+    - X-AgentID
+    - X-Agent-ID
+    - Agent-Id
+  client_ip_headers:           # 调用方机器 IP：按顺序取第一个非空（XFF 取最左一跳）
+    - X-Forwarded-For
+    - X-Real-IP
+    - X-Client-IP
+  trusted_proxies:             # 可信代理（直连方 IP 或 CIDR）；网关必须在内
+    - 10.0.0.219
+    - 127.0.0.1
+    - "::1"

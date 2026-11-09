@@ -1,0 +1,42 @@
+# ============================================================================
+# sql-executor-mcp 服务配置（正式机 10.0.0.218，端口 8040）
+#
+# 遵循《011.MCP 存放规约》：
+#   运行目录 /opt/mcpservers/sql-executor-mcp/
+#   日志     /opt/mcpservers/sql-executor-mcp/logs/
+#   密钥     /etc/sql-executor-mcp/sql-executor-mcp.env（600 root:root）
+# 密码一律用 ${环境变量名} 引用，禁止明文写入本文件。
+#
+# 判定规则不在这里：全部在 standards/executor.md（唯一事实源，热加载）。
+# ============================================================================
+
+server:
+  name: sql-executor-mcp
+  display_name: SQL-Executor
+  host: 0.0.0.0
+  port: 8040                 # 8000=dba-mcp；8020=sql-review-mcp；8040=本服务
+  path: /mcp                 # 客户端 url 必须带结尾斜杠：/mcp/
+
+# 服务准入令牌（缺失/错误 → 拒绝）
+auth:
+  header: "X-SQL-EXECUTOR-MCP-TOKEN"
+  token: ${X_SQL_EXECUTOR_MCP_TOKEN}
+
+# 存放位置：相对路径一律相对「安装根目录」。
+#   base 为空 → 跟随本包所在目录（默认）
+paths:
+  base: ""
+  config: config
+  standards: standards
+  logs: logs
+
+# 判定标准（规则）与目标环境
+standard:
+  file: standards/executor.md
+  targets: config/targets.yaml
+
+# 事实来源：mysql=连真实库（dev/test/stage）；stub=不连库，仅供本地联调与自检
+backend: mysql
+
+log:
+  level: INFO

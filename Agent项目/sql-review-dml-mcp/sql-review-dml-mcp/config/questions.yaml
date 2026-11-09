@@ -1,0 +1,119 @@
+# ============================================================================
+# 反问目录（Q-*）：命中规则/缺事实时，服务在 questions 里给研发的「要补什么」
+#
+# v1.4 起：**话术也在这里维护**，改完即生效（每次请求重读，不用重启、不用改代码）。
+#   ask      必填，给研发看的问句，支持 {占位符}（可用字段由触发它的规则决定）
+#   why      给研发看的"为什么要问"（缺省用 ask）
+#   how      怎么补（缺省空）
+#   blocking true = 阻塞项（研发必须回答才能提交）；false = 补充建议
+#   rule_id  关联规则编号（便于 get_rules 按规则查反问）
+#
+# 规则本体在 standards/ddl.md 与 standards/dml.md；想在规则里声明反问，写
+#   - **反问**：Q-DECIMAL (blocking)
+# ============================================================================
+
+questions:
+  - id: Q-TRANSACTION
+    rule_id: DM-10
+    blocking: false
+    ask: "这段 DML 没有事务包裹：请按 `START TRANSACTION; ...; COMMIT;` 提交（失败才能整体回滚）"
+    why: "规则要求提交的 DML 必须整体包在事务里；批里有 DDL 时 DDL 会隐式提交，必须拆单"
+
+  - id: Q-CTX-STRUCT
+    rule_id: AL-03
+    blocking: false
+    ask: "缺少目标表现有结构（SHOW CREATE TABLE），{column} 的原类型无法比对"
+    why: "MODIFY/CHANGE 必须声明原类型并核对；依赖事实的规则不猜、不跳过"
+    how: "传 env + database，服务会自动从 dev/test/stage 只读账号取结构"
+
+  - id: Q-CTX-ROWS
+    rule_id: SC-01
+    blocking: false
+    ask: "缺少目标表行数/容量，无法判断是否触发大表标准与执行窗口"
+    why: "大表操作需提前一天与 DBA 沟通执行可行性"
+    how: "传 env + database 后自动取 information_schema.TABLES 统计值（可能不准，需 DBA 复核）"
+
+  - id: Q-BIZ-NAME
+    rule_id: TB-01
+    blocking: true
+    ask: "表名 {name} 缺少业务名前缀，请按「业务名_表名」补齐"
+    why: "规范要求表名最前面加业务名；服务不预设业务名清单，不擅自补"
+    how: "如订单业务 → DEMO_ORDER"
+
+  - id: Q-RENAME
+    rule_id: TB-01
+    blocking: true
+    ask: "以下名称无法自动改写，请确认新名称：{items}"
+    why: "命名涉及业务语义，需人工确认"
+
+  - id: Q-TABLE-TYPE
+    rule_id: TB-11
+    blocking: true
+    ask: "表名 {name} 含 TMP/BAK/HISTORY 等字样，请确认表类型与保留月数"
+    why: "历史/归档/临时/备份表命名必须按规定前后缀与保留期"
+
+  - id: Q-TABLE-EXISTS
+    rule_id: TB-16
+    blocking: true
+    ask: "目标库已存在同名表 {table}，请确认是新建表还是变更现有表"
+    why: "建表前必须确认无同名表"
+
+  - id: Q-CTAS
+    rule_id: TB-13
+    blocking: true
+    ask: "该语句是 CTAS，请改为「先建表 + 再迁移数据」两步"
+    why: "规范禁止 CREATE TABLE ... SELECT"
+
+  - id: Q-DECIMAL
+    rule_id: TB-03
+    blocking: true
+    ask: "字段 {name} 的浮点精度请确认（当前按 DECIMAL(12,2) 处理）"
+    why: "规范要求浮点必须用 DECIMAL，精度需业务确认"
+
+  - id: Q-ENUM-MAP
+    rule_id: TB-04
+    blocking: true
+    ask: "字段 {name} 的枚举取值与数字映射请确认（已按顺序 0..n 生成）"
+    why: "ENUM 改 TINYINT 需要明确取值-数字映射"
+
+  - id: Q-DEFAULT
+    rule_id: TB-07
+    blocking: false
+    ask: "字段 {name} 改为 NOT NULL 但没有默认值，请补充业务默认值"
+    why: "规范要求所有字段 NOT NULL 且默认值不为 NULL"
+
+  - id: Q-COMMENT
+    rule_id: TB-02
+    blocking: false
+    ask: "请补充字段 {name} 的真实注释（当前是占位符）"
+    why: "规范要求表及字段必须有说明含义的注释"
+
+  - id: Q-SENSITIVE
+    rule_id: TB-05
+    blocking: false
+    ask: "字段 {name} 是 TEXT，是否可以拆到子表？"
+    why: "规范建议尽量不用 TEXT，长文本单独存放"
+
+  - id: Q-VARCHAR-LEN
+    rule_id: IX-02
+    blocking: false
+    ask: "索引 {name} 中字段 {column}（VARCHAR({length})）的前缀长度请确认"
+    why: "前缀长度影响索引区分度；唯一索引不能加前缀"
+
+  - id: Q-TYPE-CHANGE
+    rule_id: AL-03
+    blocking: true
+    ask: "字段 {name} 现网类型为 {old}，你写的是 {new}，请确认是有意变更还是笔误"
+    why: "MODIFY 的隐式类型变更风险高，需人工确认"
+
+  - id: Q-DESTRUCTIVE
+    rule_id: DX-01
+    blocking: true
+    ask: "该操作属物理删除（{name}），本通道一律驳回；请说明归档/迁移方案或改走工单系统"
+    why: "规范禁止物理删除数据（除归档、迁移）"
+
+  - id: Q-INDEX-DEL
+    rule_id: DX-04
+    blocking: true
+    ask: "确认要删除索引 {name} 吗？请说明删除原因与影响评估"
+    why: "索引删除属高风险操作，需人工确认后提交"

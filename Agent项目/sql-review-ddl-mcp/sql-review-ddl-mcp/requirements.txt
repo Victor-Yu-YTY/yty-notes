@@ -1,0 +1,10 @@
+# sql-review-ddl-mcp 依赖（Python 3.11）
+# 核心引擎（SQL 解析 / 规则 / 改写）只用标准库，不依赖 sqlglot；
+# 以下仅为 MCP 服务与 dev/test/stage 只读元数据查询所需，
+# 版本与同机 dba-mcp 已装版本对齐，避免一套机器两套依赖。
+fastmcp==2.11.2
+mcp==1.10.1
+pydantic==2.11.7
+PyYAML==6.0.3
+pymysql==1.2.3
+uvicorn==0.34.3

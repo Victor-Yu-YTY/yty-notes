@@ -1,0 +1,475 @@
+# sql-executor-mcp 用例集
+#
+# 每条用例注入一份「事实」，完全离线跑：python scripts/selfcheck.py
+# facts 字段对应 StubProvider 的键：
+#   database_exists / table{exists,rows,size_gb,engine} / columns / types
+#   nullables / has_default / primary_key / indexes / triggers / privileges
+#   replica_lag / long_trx_count / disk_free_gb / count_rows / explain_type
+#
+# expect_blocked_by 是「包含」语义：期望的 id 都要出现，允许还有别的。
+# expect_not_blocked_by 用于断言某条不应命中。
+
+cases:
+
+  # ==================== 建表 ====================
+  - id: ct-ok
+    sql: |
+      CREATE TABLE t_new (
+        ID BIGINT NOT NULL AUTO_INCREMENT COMMENT 'pk',
+        NAME VARCHAR(64) NOT NULL DEFAULT '' COMMENT 'n',
+        PRIMARY KEY (ID)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='x';
+    env: dev
+    database: demo_app
+    facts:
+      table: {exists: false}
+    expect_decision: READY
+
+  - id: ct-exists
+    database: demo_app
+    sql: |
+      CREATE TABLE t_old (ID BIGINT NOT NULL, PRIMARY KEY (ID)) ENGINE=InnoDB;
+    facts:
+      table: {exists: true, rows: 10, size_gb: 0.01}
+      columns: [ID]
+      primary_key: [ID]
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-T01]
+
+  - id: ct-no-engine
+    database: demo_app
+    sql: |
+      CREATE TABLE t_new (ID BIGINT NOT NULL, PRIMARY KEY (ID));
+    facts:
+      table: {exists: false}
+    expect_decision: READY
+    expect_warn: [EX-T04]
+
+  - id: ct-db-missing
+    database: demo_app
+    sql: |
+      CREATE TABLE t_new (ID BIGINT NOT NULL, PRIMARY KEY (ID)) ENGINE=InnoDB;
+    facts:
+      database_exists: false
+      table: {exists: false}
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-T02]
+
+  - id: ct-name-too-long
+    database: demo_app
+    sql: |
+      CREATE TABLE t_this_is_a_very_long_table_name_for_testing_length_limit_abcdefghijklmnop
+      (ID BIGINT NOT NULL, PRIMARY KEY (ID)) ENGINE=InnoDB;
+    facts:
+      table: {exists: false}
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-T03]
+
+  # ==================== 变更表 ====================
+  - id: at-addcol-ok
+    database: demo_app
+    sql: ALTER TABLE t ADD COLUMN C3 INT NOT NULL DEFAULT 0;
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID, NAME]
+      primary_key: [ID]
+    expect_decision: READY
+
+  - id: at-addcol-exists
+    database: demo_app
+    sql: ALTER TABLE t ADD COLUMN NAME VARCHAR(64);
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID, NAME]
+      primary_key: [ID]
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-A02]
+
+  - id: at-modify-missing-col
+    database: demo_app
+    sql: ALTER TABLE t MODIFY COLUMN NOPE VARCHAR(10);
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID, NAME]
+      types: {NAME: varchar(64)}
+      primary_key: [ID]
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-A03]
+
+  - id: at-table-missing
+    database: demo_app
+    sql: ALTER TABLE nope ADD COLUMN C INT;
+    facts:
+      table: {exists: false}
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-A01]
+
+  - id: at-bigtable-warn
+    database: demo_app
+    sql: ALTER TABLE t ADD COLUMN C3 INT NOT NULL DEFAULT 0;
+    facts:
+      table: {exists: true, rows: 6000000, size_gb: 1.2}
+      columns: [ID, NAME]
+      primary_key: [ID]
+    expect_decision: READY
+    expect_warn: [EX-A05]
+
+  - id: at-modify-bigtable-outside-window
+    database: demo_app
+    sql: ALTER TABLE t MODIFY COLUMN NAME VARCHAR(64);
+    env: stage
+    now: "2026-11-03T10:00:00"
+    facts:
+      table: {exists: true, rows: 9000000, size_gb: 2.0}
+      columns: [ID, NAME]
+      types: {NAME: varchar(64)}
+      primary_key: [ID]
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-A06]
+
+  - id: at-modify-bigtable-in-window
+    database: demo_app
+    sql: ALTER TABLE t MODIFY COLUMN NAME VARCHAR(64);
+    env: stage
+    now: "2026-11-03T22:00:00"
+    facts:
+      table: {exists: true, rows: 9000000, size_gb: 2.0}
+      columns: [ID, NAME]
+      types: {NAME: varchar(64)}
+      primary_key: [ID]
+    expect_decision: READY
+    expect_warn: [EX-A05]
+    expect_not_blocked_by: [EX-A06]
+
+  - id: at-modify-copy-warn
+    database: demo_app
+    sql: ALTER TABLE t MODIFY COLUMN NAME VARCHAR(300);
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID, NAME]
+      types: {NAME: varchar(64)}
+      primary_key: [ID]
+    expect_decision: READY
+    expect_warn: [EX-A08]
+
+  - id: at-modify-disk-short
+    database: demo_app
+    sql: ALTER TABLE t MODIFY COLUMN NAME VARCHAR(300);
+    facts:
+      table: {exists: true, rows: 1000000, size_gb: 100}
+      columns: [ID, NAME]
+      types: {NAME: varchar(64)}
+      primary_key: [ID]
+      disk_free_gb: 10
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-A07]
+
+  # ==================== 建索引 ====================
+  - id: ci-ok
+    database: demo_app
+    sql: CREATE INDEX IDX_NAME ON t (NAME);
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID, NAME]
+      primary_key: [ID]
+      indexes:
+        - {name: PRIMARY, columns: [ID], unique: true}
+    expect_decision: READY
+
+  - id: ci-exists
+    database: demo_app
+    sql: CREATE INDEX IDX_NAME ON t (NAME);
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID, NAME]
+      primary_key: [ID]
+      indexes:
+        - {name: PRIMARY, columns: [ID], unique: true}
+        - {name: IDX_NAME, columns: [NAME], unique: false}
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-I02]
+
+  - id: ci-col-missing
+    database: demo_app
+    sql: CREATE INDEX IDX_NOPE ON t (NOPE);
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID, NAME]
+      primary_key: [ID]
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-I03]
+
+  - id: ci-redundant
+    database: demo_app
+    sql: CREATE INDEX IDX_ID ON t (ID);
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID, NAME]
+      primary_key: [ID]
+      indexes:
+        - {name: PRIMARY, columns: [ID, NAME], unique: true}
+    expect_decision: READY
+    expect_warn: [EX-I04]
+
+  - id: ci-table-missing
+    database: demo_app
+    sql: CREATE INDEX IDX_X ON nope (A);
+    facts:
+      table: {exists: false}
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-I01]
+
+  # ==================== 插入 ====================
+  - id: in-ok
+    database: demo_app
+    sql: INSERT INTO t (ID, NAME) VALUES (1,'a'),(2,'b');
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID, NAME]
+      nullables: {ID: false, NAME: false}
+      has_default: {ID: true, NAME: true}
+      primary_key: [ID]
+    expect_decision: READY
+
+  - id: in-table-missing
+    database: demo_app
+    sql: INSERT INTO nope (ID) VALUES (1);
+    facts:
+      table: {exists: false}
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-N01]
+
+  - id: in-col-missing
+    database: demo_app
+    sql: INSERT INTO t (ID, NOPE) VALUES (1, 2);
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID, NAME]
+      nullables: {ID: false, NAME: true}
+      has_default: {ID: true, NAME: true}
+      primary_key: [ID]
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-N02]
+
+  - id: in-notnull-unfilled
+    database: demo_app
+    sql: INSERT INTO t (ID) VALUES (1);
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID, NAME]
+      nullables: {ID: false, NAME: false}
+      has_default: {ID: true, NAME: false}
+      primary_key: [ID]
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-N03]
+
+  - id: in-no-pk-warn
+    database: demo_app
+    sql: INSERT INTO t (NAME) VALUES ('a');
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID, NAME]
+      nullables: {ID: false, NAME: true}
+      has_default: {ID: true, NAME: true}
+      primary_key: [ID]
+    expect_decision: READY
+    expect_warn: [EX-N04]
+
+  - id: in-insert-select
+    database: demo_app
+    sql: INSERT INTO t (ID, NAME) SELECT ID, NAME FROM t2;
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID, NAME]
+      nullables: {ID: false, NAME: true}
+      has_default: {ID: true, NAME: true}
+      primary_key: [ID]
+    expect_decision: READY
+
+  # ==================== 更新 ====================
+  - id: up-ok
+    database: demo_app
+    sql: UPDATE t SET NAME='x' WHERE ID=1;
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID, NAME]
+      primary_key: [ID]
+      count_rows: 1
+      explain_type: ref
+    expect_decision: READY
+
+  - id: up-no-where
+    database: demo_app
+    sql: UPDATE t SET NAME='x';
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID, NAME]
+      primary_key: [ID]
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-U03]
+
+  - id: up-set-col-missing
+    database: demo_app
+    sql: UPDATE t SET NOPE=1 WHERE ID=1;
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID, NAME]
+      primary_key: [ID]
+      count_rows: 1
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-U02]
+
+  - id: up-rows-exceed
+    database: demo_app
+    sql: UPDATE t SET NAME='x' WHERE CREATE_TIME > '2026-01-01';
+    facts:
+      table: {exists: true, rows: 1000000, size_gb: 1}
+      columns: [ID, NAME, CREATE_TIME]
+      primary_key: [ID]
+      count_rows: 20000
+      explain_type: range
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-U04]
+
+  - id: up-rows-unknown
+    database: demo_app
+    sql: UPDATE t SET NAME='x' WHERE CREATE_TIME > '2026-01-01';
+    facts:
+      table: {exists: true, rows: 1000000, size_gb: 1}
+      columns: [ID, NAME, CREATE_TIME]
+      primary_key: [ID]
+      count_rows: null
+      explain_type: range
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-U05]
+
+  - id: up-full-scan-warn
+    database: demo_app
+    sql: UPDATE t SET NAME='x' WHERE CREATE_TIME > '2026-01-01';
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID, NAME, CREATE_TIME]
+      primary_key: [ID]
+      count_rows: 5
+      explain_type: ALL
+    expect_decision: READY
+    expect_warn: [EX-U06]
+
+  - id: up-trigger-warn
+    database: demo_app
+    sql: UPDATE t SET NAME='x' WHERE ID=1;
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID, NAME]
+      primary_key: [ID]
+      count_rows: 1
+      triggers: [TRG_T_AU]
+    expect_decision: READY
+    expect_warn: [EX-U07]
+
+  # ==================== 通用 ====================
+  - id: g01-delete
+    database: demo_app
+    sql: DELETE FROM t WHERE ID=1;
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID]
+      primary_key: [ID]
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-G01]
+
+  - id: g01-truncate
+    database: demo_app
+    sql: TRUNCATE TABLE t;
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-G01]
+
+  - id: g02-prod-disabled
+    database: demo_app
+    sql: INSERT INTO t (ID) VALUES (1);
+    env: prod
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID]
+      primary_key: [ID]
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-G02]
+
+  - id: g06-mixed-batch
+    database: demo_app
+    sql: |
+      CREATE TABLE t_new (ID BIGINT NOT NULL, PRIMARY KEY (ID)) ENGINE=InnoDB;
+      INSERT INTO t_new (ID) VALUES (1);
+    facts:
+      table: {exists: false}
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-G06]
+
+  - id: g07-priv-missing
+    database: demo_app
+    sql: INSERT INTO t (ID) VALUES (1);
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID]
+      primary_key: [ID]
+      privileges: [SELECT]
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-G07]
+
+  - id: g08-replica-lag
+    database: demo_app
+    sql: INSERT INTO t (ID) VALUES (1);
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID]
+      primary_key: [ID]
+      replica_lag: 120
+    expect_decision: READY
+    expect_warn: [EX-G08]
+
+  - id: g09-long-trx
+    database: demo_app
+    sql: INSERT INTO t (ID) VALUES (1);
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID]
+      primary_key: [ID]
+      long_trx_count: 2
+    expect_decision: READY
+    expect_warn: [EX-G09]
+
+  - id: g10-duplicate
+    database: demo_app
+    sql: INSERT INTO t (ID) VALUES (1);
+    recent_same_sql_count: 1
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID]
+      primary_key: [ID]
+    expect_decision: READY
+    expect_warn: [EX-G10]
+
+  - id: g04-too-many-statements
+    database: demo_app
+    sql: |
+      INSERT INTO t (ID) VALUES (1); INSERT INTO t (ID) VALUES (2);
+      INSERT INTO t (ID) VALUES (3); INSERT INTO t (ID) VALUES (4);
+      INSERT INTO t (ID) VALUES (5); INSERT INTO t (ID) VALUES (6);
+      INSERT INTO t (ID) VALUES (7); INSERT INTO t (ID) VALUES (8);
+      INSERT INTO t (ID) VALUES (9); INSERT INTO t (ID) VALUES (10);
+      INSERT INTO t (ID) VALUES (11); INSERT INTO t (ID) VALUES (12);
+      INSERT INTO t (ID) VALUES (13); INSERT INTO t (ID) VALUES (14);
+      INSERT INTO t (ID) VALUES (15); INSERT INTO t (ID) VALUES (16);
+      INSERT INTO t (ID) VALUES (17); INSERT INTO t (ID) VALUES (18);
+      INSERT INTO t (ID) VALUES (19); INSERT INTO t (ID) VALUES (20);
+      INSERT INTO t (ID) VALUES (21);
+    facts:
+      table: {exists: true, rows: 1000, size_gb: 0.1}
+      columns: [ID]
+      nullables: {ID: false}
+      has_default: {ID: true}
+      primary_key: [ID]
+    expect_decision: BLOCKED
+    expect_blocked_by: [EX-G04]

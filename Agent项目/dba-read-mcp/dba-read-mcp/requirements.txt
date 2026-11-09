@@ -1,0 +1,10 @@
+# dba-mcp 依赖（已按 10.0.1.160 离线包锁定版本，python 3.11）
+# 说明：mcp 1.10.1 依赖 pydantic<2.12 的内部 API，不能升到 2.12+
+fastmcp==2.11.2
+mcp==1.10.1
+pydantic==2.11.7
+pymysql==1.2.3
+DBUtils==3.2.0
+PyYAML==6.0.3
+sqlglot==30.23.0
+uvicorn==0.34.3

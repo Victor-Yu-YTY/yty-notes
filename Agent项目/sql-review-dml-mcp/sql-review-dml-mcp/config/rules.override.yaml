@@ -1,0 +1,32 @@
+# ============================================================================
+# 人工兜底覆盖（应急用，正常留空 rules: []）
+#
+# 生效顺序：standards/ddl.md 抽取  →  本文件覆盖  →  代码内置默认值兜底
+#
+# 用途只有两种：
+#   1) DBA 临时收紧/放宽某条规则的级别或阈值，但还没到发版时间；
+#   2) 新版 ddl.md 用了抽取器暂时认不出的新表述（--check-standard 会报缺失）。
+# 长期方案永远是：改 standards/ddl.md / 升级本服务，而不是堆在这。
+#
+# ★ 本包（sql-review-dml-mcp v1.0.0）只审 DML：本文件覆盖的是 **DDL 规则**，
+#   在本服务里 **不生效**（代码只在 DDL 规则集上应用 override，且本包不加载 ddl.md）。
+#   要临时调 DML 规则的级别 / 阈值，请直接改 standards/dml.md（改完即生效），
+#   或改 DML 规则文档里的「- **级别**：」行。
+#
+# 可用字段：
+#   check     必填，判定类型名（见源码 standard.py 的 CHECK_META，如 forbidden_float）
+#   id        可选，覆盖规则编号（默认沿用 CHECK_META 里的固定编号）
+#   level     可选，error / warn / info
+#   title     可选，规则名
+#   clause    可选，条款原文（会原样回给研发，请贴近规范措辞）
+#   params    可选，判定参数，如 types / max_columns / rows / size_gb
+#   message   可选，命中时的默认说明
+#   fix       可选，非空即表示该规则支持自动改写（仅展示用）
+#
+# 示例（仅示意，实际请勿保留）：
+#   - check: forbidden_float
+#     level: warn
+#     params: {types: [FLOAT, DOUBLE]}
+# ============================================================================
+
+rules: []

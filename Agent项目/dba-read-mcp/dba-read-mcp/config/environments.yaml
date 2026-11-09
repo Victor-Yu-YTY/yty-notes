@@ -1,0 +1,114 @@
+# ============================================================================
+# db-read-mcp v1.0.0 配置（在 v0.2.3 上只改一处：下掉假鉴权）
+#
+# 部署位置：/opt/mcpservers/dba-mcp/          《011.MCP 存放规约》
+# 密钥文件：/etc/dba-mcp/dba-mcp.env         600 root:root，systemd 注入环境变量
+#
+# 本版只做一件事：
+#   鉴权只剩一层 —— 准入令牌 X-DB-READ-MCP-TOKEN；
+#   不再有 auth.mode / auth.verify_url（原指向本机 9000 的 mock 假鉴权），
+#   也不再向任何地址转发调用方凭证。
+#
+# 监听面（server.host / port）**本版保持不变**，仍是 0.0.0.0:8000，
+# 网关登记的上游地址与调用方式全部不变。监听收敛是下一版的事。
+# ============================================================================
+
+mysql_version: "8.0.32"
+
+server:
+  name: db-read-mcp
+  host: 0.0.0.0
+  port: 8000
+  # 客户端 MCP 配置里的 url 需要带这个后缀（结尾斜杠不可省）
+  path: /mcp
+
+# ----------------------------------------------------------------------------
+# 鉴权：唯一一层 —— 准入令牌（缺失/错误 → HTTP 403，早于 MCP 协议层）
+# 令牌由部署脚本生成/沿用，写入 /etc/dba-mcp/dba-mcp.env 的 GATEWAY_TOKEN
+# ----------------------------------------------------------------------------
+auth:
+  enabled: true
+  header: "X-DB-READ-MCP-TOKEN"
+  # 兼容期头名：研发直连客户端改造完成、网关侧确认只用新头名后，把本行清空重启
+  legacy_header: "X-DBA-MCP-TOKEN"
+  token: ${GATEWAY_TOKEN}
+  # 启动即校验：令牌为空时拒绝启动（防止"什么都没校验也在跑"）
+  require_token_on_start: true
+
+# ----------------------------------------------------------------------------
+# 只读防护（8.0.32 支持 MAX_EXECUTION_TIME 与 SET SESSION TRANSACTION READ ONLY）
+# ----------------------------------------------------------------------------
+guard:
+  default_limit: 200        # 未写 LIMIT 时自动补的行数
+  max_limit: 1000           # 调用方可指定的上限
+  statement_timeout_ms: 3000
+  forbidden_schemas:
+    - mysql
+    - performance_schema
+    - sys
+
+# ----------------------------------------------------------------------------
+# 元数据缓存（SQLite）—— 全部落在 /opt/mcpservers/dba-mcp/ 下
+# ----------------------------------------------------------------------------
+cache:
+  path: /opt/mcpservers/dba-mcp/cache/metadata.db
+  metadata_ttl: 3600                   # 元数据缓存有效期，过期回源 information_schema
+  query_ttl: 300                       # 查询结果缓存有效期（仅调用方显式开启时生效）
+
+audit:
+  dir: /opt/mcpservers/dba-mcp/logs
+
+# ----------------------------------------------------------------------------
+# 查询结果导出（本版保持不变）：每次工具调用落一个 .json，返回带签名的下载链接
+# 说明：这是 v0.2.3 就有的行为，本版不删；它属于"暴露面"议题，留给下一版
+# ----------------------------------------------------------------------------
+export:
+  enabled: true
+  dir: /opt/mcpservers/dba-mcp/exports
+  ttl_seconds: 3600
+  sign_with_gateway_token: true
+  base_url: ""
+
+# ============================================================================
+# 线下三环境：三台独立主机，3306，网络可直连，直连主库（无从库）
+# 密码一律 ${环境变量} 引用，禁止明文，由 /etc/dba-mcp/dba-mcp.env 注入
+# ============================================================================
+environments:
+  dev:
+    display_name: 开发环境
+    host: 10.0.0.50
+    port: 3306
+    user: ro_user
+    password: ${DEV_DB_PASS}
+    database: null
+    pool_size: 5
+    charset: utf8mb4
+    connect_timeout: 5
+    read_timeout: 10
+    source_instance_map: {}
+
+  test:
+    display_name: 测试环境
+    host: 10.0.10.171
+    port: 3306
+    user: ro_user
+    password: ${TEST_DB_PASS}
+    database: null
+    pool_size: 5
+    charset: utf8mb4
+    connect_timeout: 5
+    read_timeout: 10
+    source_instance_map: {}
+
+  stage:
+    display_name: 模拟环境
+    host: 10.0.10.101
+    port: 3306
+    user: ro_user
+    password: ${STAGE_DB_PASS}
+    database: null
+    pool_size: 5
+    charset: utf8mb4
+    connect_timeout: 5
+    read_timeout: 10
+    source_instance_map: {}

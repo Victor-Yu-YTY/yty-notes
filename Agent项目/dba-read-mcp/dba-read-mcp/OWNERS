@@ -1,0 +1,13 @@
+# OWNERS（评审责任人登记，不影响运行）
+#
+# 用法（沿用 k8s 的 OWNERS 约定）：
+#   approvers —— 有权批准合入/上线的人
+#   reviewers —— 默认评审人
+#
+# 如与团队登记不一致，改下面这几行即可；本文件不参与服务运行。
+
+approvers:
+  - maintainer
+
+reviewers:
+  - maintainer
