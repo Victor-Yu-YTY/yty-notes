@@ -11,7 +11,8 @@ yty-notes/
 ├── 学习文档/   概念梳理与工具速查
 ├── 安装教程/   环境搭建的完整步骤
 ├── 项目经历/   生产环境项目复盘（背景 → 需求 → 方案 → 成果）
-└── Agent项目/  MCP 服务的设计与功能说明
+├── Agent项目/  MCP 服务的功能说明与代码存档
+└── 参考规范/   MCP 编写方法与约定
 ```
 
 ## 内容索引
@@ -22,6 +23,7 @@ yty-notes/
 | --- | --- |
 | [Grafana大盘绘制与告警设计](学习文档/Grafana大盘绘制与告警设计.md) | 大盘怎么画、告警怎么设；PromQL 写法与时段阈值的真实踩坑 |
 | [MCP学习文档](学习文档/MCP学习文档.md) | MCP 速查：三个角色、消息格式、工具八要素、八个坑 |
+| [Linux服务器常用命令手册](学习文档/Linux服务器常用命令手册.md) | 运维 / DBA 命令分类速查：远程传输、systemd、进程资源、网络端口、防火墙、文本处理、磁盘、定时任务、Docker、数据库 |
 
 ### 安装教程
 
@@ -44,10 +46,17 @@ yty-notes/
 
 | 文档 | 讲什么 |
 | --- | --- |
-| [线下只读MySQL MCP](Agent项目/线下只读MySQL%20MCP.md) | 只读 MySQL 能力接入 AgentSpec 体系：身份平台发证 → 受管网关验票转发 → MCP 执行 |
-| [SQL Executor MCP 功能说明](Agent项目/SQL%20Executor%20MCP%20功能说明.md) | 执行类 MCP：服务边界、5 个工具、判定模型、执行机制与安全设计 |
-| [SQL Review DDL MCP 功能说明](Agent项目/SQL%20Review%20DDL%20MCP%20功能说明.md) | DDL 审核 MCP：8 个工具、四态判定、设计要点与已知边界 |
-| [SQL Review DML MCP 功能说明](Agent项目/SQL%20Review%20DML%20MCP%20功能说明.md) | DML 审核 MCP：4 个工具、三态判定、典型调用流程 |
+| [MCP 工具集总览](Agent项目/README.md) | 四个 MySQL DBA MCP 的职责分工（只读查询 → 规范审查 → 写操作执行）与共同设计取舍 |
+| [线下只读MySQL MCP](Agent项目/dba-read-mcp/线下只读MySQL%20MCP.md) | 只读 MySQL 能力接入 AgentSpec 体系：身份平台发证 → 受管网关验票转发 → MCP 执行 |
+| [SQL Executor MCP 功能说明](Agent项目/sql-executor-mcp/SQL%20Executor%20MCP%20功能说明.md) | 执行类 MCP：服务边界、5 个工具、判定模型、执行机制与安全设计 |
+| [SQL Review DDL MCP 功能说明](Agent项目/sql-review-ddl-mcp/SQL%20Review%20DDL%20MCP%20功能说明.md) | DDL 审核 MCP：8 个工具、四态判定、设计要点与已知边界 |
+| [SQL Review DML MCP 功能说明](Agent项目/sql-review-dml-mcp/SQL%20Review%20DML%20MCP%20功能说明.md) | DML 审核 MCP：4 个工具、三态判定、典型调用流程 |
+
+### 参考规范
+
+| 文档 | 讲什么 |
+| --- | --- |
+| [MCP编写规范](参考规范/MCP编写规范.md) | 从 3 个真实 MCP 归纳：标准目录结构、7 条设计经验、写新 MCP 前的 5 个问题清单、命名与版本约定、常见坑 |
 
 ## 阅读约定
 
