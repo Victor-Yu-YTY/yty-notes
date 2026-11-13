@@ -1,8 +1,8 @@
 # yty-notes
 
-个人笔记与项目记录。围绕 **数据库运维（MySQL / Oracle）**、**监控告警（Grafana / Prometheus）**、**系统与平台治理**、**AI Agent（MCP 服务）** 几条线，沉淀可复用的方法、命令与踩坑复盘。
+个人笔记与项目记录。围绕 **数据库运维（MySQL / Oracle / MongoDB / Redis）**、**监控告警（Grafana / Prometheus）**、**系统与平台治理**、**AI Agent（MCP 服务）** 几条线，沉淀可复用的方法、命令与踩坑复盘。
 
-主体是可直接对照执行的文档；`Agent项目/` 下另有四个 MCP 的脱敏源码存档，可本地跑离线自检，但开箱不能直接连库（配置需自行补全）。
+主体是可直接对照执行的文档；`Agent项目/` 下另有六个 MCP 的脱敏源码存档，可本地跑离线自检，但开箱不能直接连库（配置需自行补全）。
 
 ## 目录结构
 
@@ -16,11 +16,13 @@ yty-notes/
 │   ├── dba-read-mcp/          只读查询（9 个工具）
 │   ├── sql-review-ddl-mcp/    DDL 审查（8 个工具）
 │   ├── sql-review-dml-mcp/    DML 审查（4 个工具）
-│   └── sql-executor-mcp/      DDL/DML 执行（5 个工具）
+│   ├── sql-executor-mcp/      DDL/DML 执行（5 个工具）
+│   ├── mongodb-read-mcp/      MongoDB 只读查询与巡检（13 个工具）
+│   └── redis-read-mcp/        Redis 只读排查（11 个工具）
 └── 参考规范/   MCP 编写方法与约定
 ```
 
-`Agent项目/` 每个子目录的形态一致：一份 `<名称> 功能说明.md` 讲设计，一个同名代码包（如 `dba-read-mcp/dba-read-mcp/`）放 `src/`、`config/`、`scripts/`、`standards/`。
+`Agent项目/` 每个子目录的形态一致：一份 `<名称> 功能说明.md` 讲设计，一个代码包（如 `dba-read-mcp/dba-read-mcp/`、`mongodb-read-mcp/mongodb-ro-mcp/`）放 `src/`、`config/`、`scripts/`。SQL 审查类包另有 `standards/` 规则文档，MongoDB / Redis 包另有 `deploy/` 部署脚本与 systemd 模板。
 
 ## 内容索引
 
@@ -55,11 +57,13 @@ yty-notes/
 
 | 文档 | 讲什么 |
 | --- | --- |
-| [MCP 工具集总览](Agent项目/README.md) | 四个 MySQL DBA MCP 的职责分工（只读查询 → 规范审查 → 写操作执行）与共同设计取舍 |
+| [MCP 工具集总览](Agent项目/README.md) | 六个数据库 MCP 的职责分工（MySQL 线：只读查询 → 规范审查 → 写操作执行；MongoDB / Redis 线：只读摸底）与共同设计取舍 |
 | [线下只读MySQL MCP](Agent项目/dba-read-mcp/线下只读MySQL%20MCP.md) | 只读 MySQL 能力接入 AgentSpec 体系：身份平台发证 → 受管网关验票转发 → MCP 执行 |
 | [SQL Executor MCP 功能说明](Agent项目/sql-executor-mcp/SQL%20Executor%20MCP%20功能说明.md) | 执行类 MCP：服务边界、5 个工具、判定模型、执行机制与安全设计 |
 | [SQL Review DDL MCP 功能说明](Agent项目/sql-review-ddl-mcp/SQL%20Review%20DDL%20MCP%20功能说明.md) | DDL 审核 MCP：8 个工具、四态判定、设计要点与已知边界 |
 | [SQL Review DML MCP 功能说明](Agent项目/sql-review-dml-mcp/SQL%20Review%20DML%20MCP%20功能说明.md) | DML 审核 MCP：4 个工具、三态判定、典型调用流程 |
+| [MongoDB Read MCP 功能说明](Agent项目/mongodb-read-mcp/MongoDB%20Read%20MCP%20功能说明.md) | MongoDB 只读 MCP：13 个工具、算子递归黑名单、副本集与慢操作巡检 |
+| [Redis Read MCP 功能说明](Agent项目/redis-read-mcp/Redis%20Read%20MCP%20功能说明.md) | Redis 只读 MCP：11 个工具、只读边界为何只能落在代码里、Predixy 白名单与兼容坑 |
 
 ### 参考规范
 

@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# 运行期状态（不进版本库、不进交付包）
+logs/*
+!logs/.gitkeep
+backup/
+*.log
+
+# 凭据：一律走 /etc/mongodb-ro-mcp/mongodb-ro-mcp.env 注入，禁止入库
+.env
+*.env
+.env.*
+config/environments.local.yaml
+
+# 交付产物
+*.tar.gz

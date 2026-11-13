@@ -1,0 +1,166 @@
+# ============================================================================
+# mongodb-ro-mcp v1.0.0 运行期配置（正式机 10.0.0.218，端口 8040，网关后面）
+#
+# 遵循《MCP 存放规约》与《MCP 编写规约》：
+#   运行目录 /opt/mcpservers/mongodb-ro-mcp/
+#   日志     /opt/mcpservers/mongodb-ro-mcp/logs/         ← audit.dir（相对安装根目录）
+#   密钥     /etc/mongodb-ro-mcp/mongodb-ro-mcp.env       ← 600 root:root，systemd 注入
+#
+# 本文件**不含任何密钥**：账号口令一律 ${VAR} 引用，由 EnvironmentFile 注入。
+# 存放位置相关配置分两层，改位置时只改这两处：
+#   1) config/deploy.conf —— 部署期路径（安装目录 / 密钥目录 / 端口 / 备份保留份数）
+#   2) 本文件 server / audit —— 运行期监听与日志留存
+# deploy.sh 会校验两层是否一致（端口、日志目录），不一致直接中止。
+#
+# 目标实例：MongoDB 4.0.20（wire version 7）。pymongo 必须 4.6.x，别升。
+# ============================================================================
+
+mongo_version: "4.0.20"
+
+server:
+  name: mongodb-ro-mcp
+  display_name: MongoDB Read     # 对外显示名（网关注册名同此）
+  host: 0.0.0.0
+  port: 8040                     # 8000=dba-mcp、8010=sql-review-ddl、8020=旧sql-review、8030=sql-review-dml
+  path: /mcp                     # 客户端 url 必须带结尾斜杠：/mcp/
+
+# ----------------------------------------------------------------------------
+# 唯一一层鉴权：准入令牌（缺失/错误 → HTTP 403，早于 MCP 协议层）
+# 令牌由部署脚本生成/沿用，写入 /etc/mongodb-ro-mcp/mongodb-ro-mcp.env 的 GATEWAY_TOKEN
+# ----------------------------------------------------------------------------
+auth:
+  enabled: true
+  header: "X-MONGODB-RO-MCP-TOKEN"
+  # 兼容期头名；研发直连客户端改造完成、网关侧确认只用新头名后，把本行清空重启
+  legacy_header: "X-MONGODB-MCP-TOKEN"
+  token: ${GATEWAY_TOKEN}
+  # 启动即校验：令牌为空时拒绝启动（防止"什么都没校验也在跑"）
+  require_token_on_start: true
+
+# ----------------------------------------------------------------------------
+# 只读防线与输出限额（改这里不用改代码）
+#   forbidden_operators: 管道/查询条件里一律禁止的算子
+#     $out/$merge        —— 落盘写库
+#     $where/$function/$accumulator —— 服务端 JS 执行
+#   forbidden_dbs: 数据查询类工具不允许访问的库（巡检三工具走内部代码路径，不受此限）
+# ----------------------------------------------------------------------------
+guard:
+  default_limit: 20              # find/aggregate 未指定时的条数
+  max_limit: 100                 # 调用方可指定的上限
+  timeout_ms: 30000              # 单次查询 maxTimeMS，超时即返回而不拖住实例
+  max_field_chars: 2000          # 单个字符串字段截断长度
+  max_bytes: 1048576             # 单次响应字节上限（1 MiB）
+  allow_disk_use: false          # 聚合是否允许落盘（默认禁止，保护服务器 IO）
+  forbidden_operators:
+    - $out
+    - $merge
+    - $where
+    - $function
+    - $accumulator
+  forbidden_dbs:
+    - admin
+    - config
+    - local
+
+# ----------------------------------------------------------------------------
+# 审计日志（<安装目录>/logs/audit-mongo-YYYY-MM-DD.jsonl）
+#   只记事实、语义最小化：查询默认只落 sha256 与长度，**不落明文**
+#   （要看明文摘要把 record_query_text 改成 true，会落 ≤500 字符的清洗摘要）
+#   来源信息：client_ip（调用方机器 IP）+ agent_id（调用方 AgentID），由网关透传
+# ----------------------------------------------------------------------------
+audit:
+  enabled: true
+  dir: logs                      # 相对安装根目录；填绝对路径则整包搬到别处也能跑
+  filename_prefix: audit-mongo   # 文件名前缀：<prefix>-YYYY-MM-DD.jsonl
+  ext: .jsonl
+  retention_days: 30             # 保留天数；<=0 表示永久保留
+  compress_after_days: 7         # 超过该天数转 .gz；<=0 表示不压缩
+  log_http_errors: true          # POST 且 HTTP>=400（协议层拒绝）也写一行留痕
+  record_query_text: false       # 默认不落查询明文，只落 sha256/长度
+
+# ============================================================================
+# 调用方身份：网关把「调用方机器 IP + AgentID」透传到本服务 → 落每行审计
+#
+#   用途：查到「哪台机器、哪个 Agent 调了哪个工具、结论如何」；只记日志，不参与判定。
+#   安全：只有**直连方**在 trusted_proxies 内时才采信下面的透传头（防伪造）；
+#         否则只记直连方 IP，并在日志里标 identity_trusted=false。
+#   网关侧配套：forward_headers = ["X-Agent-Id", "X-Forwarded-For"]（见 README 第 7 节）
+# ============================================================================
+identity:
+  record: true                   # 是否把身份字段写进审计日志
+  agent_id_headers:              # 调用方 AgentID：按顺序取第一个非空
+    - X-Agent-Id
+    - X-AgentID
+    - X-Agent-ID
+    - Agent-Id
+  client_ip_headers:             # 调用方机器 IP：按顺序取第一个非空（XFF 取最左一跳）
+    - X-Forwarded-For
+    - X-Real-IP
+    - X-Client-IP
+  trusted_proxies:               # 可信代理（直连方 IP 或 CIDR）；网关必须在内
+    - 10.0.0.219
+    - 127.0.0.1
+    - "::1"
+
+# ============================================================================
+# 三套环境：dev 开发 / test 测试 / stage 模拟
+#
+#   ★ 对外统一叫 dev / test / stage —— stage 的**实际实例是内部 mirror 副本集**
+#     （actual: mirror），`mirror` / `sim` 作为别名继续可用。
+#     原因：MySQL 体系与网关编组（mysql_scope 等）对外只有 dev/test/stage，
+#     Agent 与 Skill 也按这三档写；MongoDB 侧内部历来叫 mirror，所以配置里做一层
+#     映射：调用方传 stage / mirror / sim 都落到同一个实例，
+#     响应回显 env（规范名 stage）、env_actual（实际实例 mirror，传别名时另附 env_alias），
+#     审计里三个字段都记。
+#
+#   连接信息两种写法（二选一）：
+#     写法 A（推荐，逐项可读）：hosts + replica_set + user + password
+#     写法 B（应急）：直接用 uri: ${MONGO_URI_DEV} 注入整串
+#
+#   口令一律 ${VAR} 引用，由 /etc/mongodb-ro-mcp/mongodb-ro-mcp.env 注入：
+#     MONGO_DEV_USER / MONGO_DEV_PASS
+#     MONGO_TEST_USER / MONGO_TEST_PASS
+#     MONGO_STAGE_USER / MONGO_STAGE_PASS      （stage = 内部 mirror 实例）
+#   （三环境同一套只读账号时，也可以只给 MONGO_RO_USER + MONGO_RO_PASS，
+#     然后把各环境的 user/password 都改成引用这两个变量。）
+# ============================================================================
+environments:
+  dev:
+    display_name: 开发环境
+    actual: dev
+    aliases: []
+    note: 副本集 replica_dev
+    hosts: "10.0.0.91:27017,10.0.0.92:27017,10.0.0.93:27017"
+    replica_set: replica_dev
+    auth_source: admin
+    read_preference: secondaryPreferred   # 查询压力压到从库
+    user: ${MONGO_DEV_USER}
+    password: ${MONGO_DEV_PASS}
+    connect_timeout_ms: 8000
+
+  test:
+    display_name: 测试环境
+    actual: test
+    aliases: []
+    note: 副本集 replica_test
+    hosts: "10.0.10.105:27017,10.0.10.106:27017,10.0.10.107:27017"
+    replica_set: replica_test
+    auth_source: admin
+    read_preference: secondaryPreferred
+    user: ${MONGO_TEST_USER}
+    password: ${MONGO_TEST_PASS}
+    connect_timeout_ms: 8000
+
+  stage:
+    display_name: 模拟环境
+    actual: mirror                          # ★ 规范名 stage，实际实例是 mirror 副本集
+    aliases: [mirror, sim]                  # ★ 传 mirror / sim 也落到这里
+    note: 副本集 replica_mirror
+    hosts: "10.0.10.108:27017,10.0.10.109:27017,10.0.10.110:27017"
+    replica_set: replica_mirror
+    auth_source: admin
+    read_preference: secondaryPreferred
+    user: ${MONGO_STAGE_USER}
+    password: ${MONGO_STAGE_PASS}
+    connect_timeout_ms: 8000
+

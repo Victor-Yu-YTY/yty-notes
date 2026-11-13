@@ -1,0 +1,17 @@
+# DBA Redis Read MCP 依赖（python 3.11 / 10.0.0.218 离线包锁定）
+#
+# 为什么锁这几个版本：
+#   1) redis==8.1.0 —— 本服务固定传 protocol=2 + lib_name="" 两个参数：
+#      · protocol=2 避免 redis-py 8.x 默认的 RESP3 `HELLO` 握手（Redis 5.0.6 不认）；
+#      · lib_name=""  避免连接时发 `CLIENT SETINFO`（Predixy 白名单拒 `CLIENT`）。
+#      这两个关键字是 redis-py 5.0+ 才有的，低于 5 会退化成"能连但会报 unknown
+#      command"，所以版本必须锁死、不要随手升降。
+#   2) fastmcp 2.11.2 + mcp 1.10.1 —— 与 db-read-mcp / sql-review-* / mongodb-ro-mcp
+#      同版本线（同一台 218 上已装过这套轮子，离线安装最省事）；
+#      mcp 1.10.1 依赖 pydantic<2.12 的内部 API，不能升到 2.12+。
+redis==8.1.0
+fastmcp==2.11.2
+mcp==1.10.1
+pydantic==2.11.7
+PyYAML==6.0.3
+uvicorn==0.34.3

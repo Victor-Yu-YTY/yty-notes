@@ -1,0 +1,15 @@
+# DBA MongoDB Read MCP 依赖（python 3.11 / 10.0.0.218 离线包锁定）
+#
+# 为什么锁这两个版本：
+#   1) pymongo 必须 4.6.x —— 三套环境是 MongoDB 4.0.20（wire version 7）。
+#      pymongo 4.9+ 起要求 wire 8（4.2+）、4.19 起要求 wire 9（4.4+），装上直接
+#      ConfigurationError: Server at ... reports wire version 7, but this version
+#      of PyMongo requires at least 8。实测 4.6.3 可正常连 wire 7。
+#   2) fastmcp 2.11.2 + mcp 1.10.1 —— 与 db-read-mcp / sql-review-* 同版本线，
+#      mcp 1.10.1 依赖 pydantic<2.12 的内部 API，不能升到 2.12+。
+pymongo==4.6.3
+fastmcp==2.11.2
+mcp==1.10.1
+pydantic==2.11.7
+PyYAML==6.0.3
+uvicorn==0.34.3

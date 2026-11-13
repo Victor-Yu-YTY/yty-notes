@@ -1,0 +1,268 @@
+# ============================================================================
+# redis-ro-mcp 运行期配置（正式机 10.0.0.218，端口 8050，网关后面）
+#
+# 遵循《MCP 存放规约》与《MCP 编写规约》：
+#   运行目录 /opt/mcpservers/redis-ro-mcp/
+#   日志     /opt/mcpservers/redis-ro-mcp/logs/         ← audit.dir（相对安装根目录）
+#   密钥     /etc/redis-ro-mcp/redis-ro-mcp.env         ← 600 root:root，systemd 注入
+#
+# 本文件**不含任何密钥**：口令一律 ${VAR} 引用，由 EnvironmentFile 注入。
+# 支持两种引用写法：
+#   ${VAR}   —— 必填，缺失即拒绝启动；
+#   ${VAR:-} —— 可选，缺失时展开成空串（当前三套实例均**无密码**，所以口令一律用这种）。
+#
+# 存放位置相关配置分两层，改位置时只改这两处：
+#   1) config/deploy.conf —— 部署期路径（安装目录 / 密钥目录 / 端口 / 备份保留份数）
+#   2) 本文件 server / audit —— 运行期监听与日志留存
+# deploy.sh 会校验两层是否一致（端口、日志目录），不一致直接中止。
+#
+# 目标实例：Redis 5.0.6（无密码、无 ACL）+ 前置 Predixy 1.0.5 代理，端口 25900、db0。
+# ★ 所以 server 侧固定 protocol: 2、lib_name: ""（见各环境条目注释）。
+# ============================================================================
+
+redis_version: "5.0.6"
+proxy: "Predixy 1.0.5"
+
+server:
+  name: redis-ro-mcp
+  display_name: Redis Read       # 对外显示名（网关注册名同此）
+  host: 0.0.0.0
+  port: 8050                     # 8000=dba-mcp、8010=sql-review-ddl、8020=旧sql-review、8030=sql-review-dml、8040=mongodb-ro
+  path: /mcp                     # 客户端 url 必须带结尾斜杠：/mcp/
+
+# ----------------------------------------------------------------------------
+# 唯一一层鉴权：准入令牌（缺失/错误 → HTTP 403，早于 MCP 协议层）
+# 令牌由部署脚本生成/沿用，写入 /etc/redis-ro-mcp/redis-ro-mcp.env 的 GATEWAY_TOKEN
+# ----------------------------------------------------------------------------
+auth:
+  enabled: true
+  header: "X-REDIS-RO-MCP-TOKEN"
+  # 兼容期头名；研发直连客户端改造完成、网关侧确认只用新头名后，把本行清空重启
+  legacy_header: "X-REDIS-MCP-TOKEN"
+  token: ${GATEWAY_TOKEN}
+  # 启动即校验：令牌为空时拒绝启动（防止"什么都没校验也在跑"）
+  require_token_on_start: true
+
+# ----------------------------------------------------------------------------
+# 只读防线与输出限额（改这里不用改代码）
+#
+#   allowed_commands      —— 本服务可能发出的命令全集（= README §2 的 Predixy 白名单）
+#   forbidden_commands    —— 写命令黑名单：源码里一个都不许出现，verify.sh 会静态断言
+#   proxy_rejected_commands —— Predixy 实测拒绝的命令：工具面不提供，也不去调用
+#   allowed_commands 里的 "config|get" 表示 `CONFIG GET <单参数>`（注意是竖线不是空格）
+# ----------------------------------------------------------------------------
+guard:
+  default_count: 100             # SCAN 单轮 COUNT（代理不保证精确）
+  max_count: 500                 # 调用方可指定的 COUNT 上限
+  max_members: 100               # hash/set/zset 单次返回成员上限
+  max_limit: 500                 # find_keys 收集上限
+  max_sample: 2000               # bigkey_scan 采样上限
+  max_top: 100                   # bigkey_scan Top N 上限
+  max_field_chars: 2000          # 单个字符串值截断长度
+  max_bytes: 1048576             # 单次响应字节上限（1 MiB）
+  max_scan_rounds: 60            # find_keys / bigkey_scan 的 SCAN 轮数上限（防扫全库）
+  max_key_len: 512               # key 长度上限
+  max_pattern_len: 256           # SCAN pattern 长度上限
+  socket_timeout_ms: 5000        # 单条命令超时
+  connect_timeout_ms: 5000       # 建连超时
+  allowed_commands:
+    - ping
+    - info
+    - config|get
+    - scan
+    - randomkey
+    - type
+    - ttl
+    - exists
+    - strlen
+    - getrange
+    - lrange
+    - llen
+    - hgetall
+    - hget
+    - hlen
+    - hkeys
+    - smembers
+    - scard
+    - zrange
+    - zcard
+    - zrangebyscore
+  forbidden_commands:
+    - set
+    - setnx
+    - setex
+    - psetex
+    - getset
+    - append
+    - setrange
+    - mset
+    - msetnx
+    - incr
+    - decr
+    - incrby
+    - decrby
+    - incrbyfloat
+    - hset
+    - hmset
+    - hsetnx
+    - hincrby
+    - hincrbyfloat
+    - hdel
+    - lpush
+    - rpush
+    - lpushx
+    - rpushx
+    - lpop
+    - rpop
+    - lset
+    - linsert
+    - ltrim
+    - lrem
+    - sadd
+    - srem
+    - spop
+    - smove
+    - zadd
+    - zrem
+    - zincrby
+    - zremrangebyrank
+    - zremrangebyscore
+    - zpopmin
+    - zpopmax
+    - del
+    - unlink
+    - expire
+    - pexpire
+    - expireat
+    - persist
+    - rename
+    - renamenx
+    - move
+    - copy
+    - restore
+    - flushall
+    - flushdb
+    - swapdb
+    - eval
+    - evalsha
+    - script
+    - function
+    - multi
+    - exec
+    - watch
+    - publish
+    - spublish
+  proxy_rejected_commands:
+    - dbsize
+    - object
+    - memory
+    - slowlog
+    - client
+    - cluster
+
+# ----------------------------------------------------------------------------
+# 审计日志（<安装目录>/logs/audit-redis-YYYY-MM-DD.jsonl）
+#   只记事实、语义最小化：key/pattern 默认只落 sha256 与长度，**不落明文**
+#   （要看明文摘要把 record_query_text 改成 true，会落 ≤500 字符的清洗摘要）
+#   来源信息：client_ip（调用方机器 IP）+ agent_id（调用方 AgentID），由网关透传
+#   字段映射：database = "db0"、collection = 被访问的 key（沿用同一份 JSONL schema）
+# ----------------------------------------------------------------------------
+audit:
+  enabled: true
+  dir: logs                      # 相对安装根目录；填绝对路径则整包搬到别处也能跑
+  filename_prefix: audit-redis   # 文件名前缀：<prefix>-YYYY-MM-DD.jsonl
+  ext: .jsonl
+  retention_days: 30             # 保留天数；<=0 表示永久保留
+  compress_after_days: 7         # 超过该天数转 .gz；<=0 表示不压缩
+  log_http_errors: true          # POST 且 HTTP>=400（协议层拒绝）也写一行留痕
+  record_query_text: false       # 默认不落 key 明文，只落 sha256/长度
+
+# ============================================================================
+# 调用方身份：网关把「调用方机器 IP + AgentID」透传到本服务 → 落每行审计
+#
+#   用途：查到「哪台机器、哪个 Agent 调了哪个工具、结论如何」；只记日志，不参与判定。
+#   安全：只有**直连方**在 trusted_proxies 内时才采信下面的透传头（防伪造）；
+#         否则只记直连方 IP，并在日志里标 identity_trusted=false。
+#   网关侧配套：forward_headers = ["X-Agent-Id", "X-Forwarded-For"]（见 README 第 7 节）
+# ============================================================================
+identity:
+  record: true                   # 是否把身份字段写进审计日志
+  agent_id_headers:              # 调用方 AgentID：按顺序取第一个非空
+    - X-Agent-Id
+    - X-AgentID
+    - X-Agent-ID
+    - Agent-Id
+  client_ip_headers:             # 调用方机器 IP：按顺序取第一个非空（XFF 取最左一跳）
+    - X-Forwarded-For
+    - X-Real-IP
+    - X-Client-IP
+  trusted_proxies:               # 可信代理（直连方 IP 或 CIDR）；网关必须在内
+    - 10.0.0.219
+    - 127.0.0.1
+    - "::1"
+
+# ============================================================================
+# 三套环境：dev 开发 / test 测试 / stage 模拟
+#
+#   ★ 对外统一叫 dev / test / stage —— stage 的**实际实例是内部 mirror**
+#     （actual: mirror），`mirror` / `sim` 作为别名继续可用。
+#     原因：MySQL/MongoDB 体系与网关编组（mysql_scope / mongo_scope）对外只有
+#     dev/test/stage，Agent 与 Skill 也按这三档写；Redis 侧内部历来叫 mirror，
+#     所以配置里做一层映射：调用方传 stage / mirror / sim 都落到同一个实例，
+#     响应回显 env（规范名 stage）、env_actual（实际实例 mirror，传别名时另附 env_alias），
+#     审计里两个都记。
+#
+#   ★ 三套实例的连接特征完全一致：**无密码、无 ACL、db0、经 Predixy 代理 25900**。
+#     所以 protocol: 2 / lib_name: "" 两条必须保留——它们是为了兼容
+#     「Redis 5.0.6 + Predixy 1.0.5」，删掉会直接连不上（见 README §3）。
+#
+#   口令：当前无密码，写法是 ${XXX:-}（可选引用，缺失时为空）。
+#        日后若某环境启用 requirepass / ACL，在
+#        /etc/redis-ro-mcp/redis-ro-mcp.env 里注入 REDIS_DEV_PASS 等即可，
+#        本文件不用改。
+# ============================================================================
+environments:
+  dev:
+    display_name: 开发环境
+    actual: dev
+    aliases: []
+    note: 经 Predixy 代理（1.0.5）→ 后端 Redis 5.0.6；无密码、无 ACL、db0
+    host: 10.0.0.32
+    port: 25900
+    db: 0
+    username: ""
+    password: ${REDIS_DEV_PASS:-}
+    protocol: 2                  # ★ Redis 5 不认 RESP3 的 HELLO
+    lib_name: ""                 # ★ Predixy 白名单拒绝 CLIENT SETINFO
+    socket_timeout_ms: 5000
+    connect_timeout_ms: 5000
+
+  test:
+    display_name: 测试环境
+    actual: test
+    aliases: []
+    note: 经 Predixy 代理（1.0.5）→ 后端 Redis 5.0.6；无密码、无 ACL、db0
+    host: 10.0.10.33
+    port: 25900
+    db: 0
+    username: ""
+    password: ${REDIS_TEST_PASS:-}
+    protocol: 2
+    lib_name: ""
+    socket_timeout_ms: 5000
+    connect_timeout_ms: 5000
+
+  stage:
+    display_name: 模拟环境
+    actual: mirror                          # ★ 规范名 stage，实际实例是 mirror
+    aliases: [mirror, sim]                  # ★ 传 mirror / sim 也落到这里
+    note: 经 Predixy 代理（1.0.5）→ 后端 Redis 5.0.6；无密码、无 ACL、db0
+    host: 10.0.10.35
+    port: 25900
+    db: 0
+    username: ""
+    password: ${REDIS_STAGE_PASS:-}
+    protocol: 2
+    lib_name: ""
+    socket_timeout_ms: 5000
+    connect_timeout_ms: 5000
