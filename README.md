@@ -1,6 +1,6 @@
 # yty-notes
 
-个人笔记与项目记录。围绕 **数据库运维（MySQL / Oracle / MongoDB / Redis / Greenplum）**、**监控告警（Grafana / Prometheus）**、**系统与平台治理**、**AI Agent（MCP 服务）** 几条线，沉淀可复用的方法、命令与踩坑复盘。
+个人笔记与项目记录。围绕 **数据库运维（MySQL / Oracle / MongoDB / Redis / Greenplum）**、**监控告警（Grafana / Prometheus）**、**消息中间件（Kafka）**、**系统与平台治理**、**AI Agent（MCP 服务）** 几条线，沉淀可复用的方法、命令与踩坑复盘。
 
 主体是可直接对照执行的文档；`Agent项目/` 下另有六个 MCP 的脱敏源码存档，可本地跑离线自检，但开箱不能直接连库（配置需自行补全）。
 
@@ -19,7 +19,7 @@ yty-notes/
 │   ├── sql-executor-mcp/      DDL/DML 执行（5 个工具）
 │   ├── mongodb-read-mcp/      MongoDB 只读查询与巡检（13 个工具）
 │   └── redis-read-mcp/        Redis 只读排查（11 个工具）
-└── 参考规范/   MCP 编写方法与约定
+└── 参考规范/   MCP 编写规范与可复用脚本模板
 ```
 
 `Agent项目/` 每个子目录的形态一致：一份 `<名称> 功能说明.md` 讲设计，一个代码包（如 `dba-read-mcp/dba-read-mcp/`、`mongodb-read-mcp/mongodb-ro-mcp/`）放 `src/`、`config/`、`scripts/`。SQL 审查类包另有 `standards/` 规则文档，MongoDB / Redis 包另有 `deploy/` 部署脚本与 systemd 模板。
@@ -37,6 +37,7 @@ yty-notes/
 | **运维工具** | |
 | [Ansible学习文档](学习文档/Ansible学习文档.md) | 零基础建认知：核心概念速查、两个真实 playbook 场景（SSH 公钥推送+白名单加固、硬件信息批采）、常见坑 |
 | [Grafana大盘绘制与告警设计](学习文档/Grafana大盘绘制与告警设计.md) | 大盘怎么画、告警怎么设；PromQL 写法与时段阈值的真实踩坑 |
+| [Kafka学习文档](学习文档/Kafka学习文档.md) | 消费延迟（Lag）认知：Kafka 是什么、Lag 是什么、表重建为何积压十几万条、其他易积压操作、延迟过大的影响 |
 | **通用** | |
 | [MCP学习文档](学习文档/MCP学习文档.md) | MCP 速查：三个角色、消息格式、工具八要素、八个坑 |
 | [Linux服务器常用命令手册](学习文档/Linux服务器常用命令手册.md) | 运维 / DBA 命令分类速查：远程传输、systemd、进程资源、网络端口、防火墙、文本处理、磁盘、定时任务、Docker、数据库 |
@@ -46,6 +47,7 @@ yty-notes/
 | 文档 | 讲什么 |
 | --- | --- |
 | [MySQL-8.4.10-二进制服务器部署教程](安装教程/MySQL-8.4.10-二进制服务器部署教程.md) | CentOS 7 上用二进制包部署 MySQL 8.4.10：目录规划、my.cnf、初始化、systemd、报错汇总 |
+| [mysqld_exporter部署操作文档](安装教程/mysqld_exporter部署操作文档.md) | v0.15.1 采集器部署：安装、建监控用户、配置文件、启动验证、systemd 托管、Prometheus 抓取、常见问题 |
 | [DeepSeek-Harness-本地部署与使用教程](安装教程/DeepSeek-Harness-本地部署与使用教程.md) | DSH 本地安装、API Key 配置、开机自启、插件管理 |
 
 ### 项目经历
@@ -78,6 +80,7 @@ yty-notes/
 | 文档 | 讲什么 |
 | --- | --- |
 | [MCP编写规范](参考规范/MCP编写规范.md) | 从 3 个真实 MCP 归纳：标准目录结构、7 条设计经验、写新 MCP 前的 5 个问题清单、命名与版本约定、常见坑 |
+| [大表归档脚本编写模板](参考规范/大表归档脚本编写模板.md) | PUB 集群三步脚本速查：全量归档、表重建、每日增量各自的脚本与定时拉起方式，附闭环验收 |
 
 ## 阅读约定
 
